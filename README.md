@@ -20,7 +20,9 @@ Steamのレビューを収集するアプリケーションです
 
 ## 使い方
 ### 準備編
-- [peppage/kettle: Steam API client written in golang](https://github.com/peppage/kettle)に依存しているため、よしなに処理してください
+- 以下のライブラリに依存しています よしなにしてください
+    - [gocarina/gocsv: The GoCSV package aims to provide easy CSV serialization and deserialization to the golang programming language](https://github.com/gocarina/gocsv)
+    - [peppage/kettle: Steam API client written in golang](https://github.com/peppage/kettle)
 - [Steam API Key](https://steamcommunity.com/dev/apikey)が必要になります 用意してください
 - `appId.csv` というファイルが必要になるため、事前に調査対象のAppIdを収集してください
 
