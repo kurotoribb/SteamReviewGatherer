@@ -1,0 +1,2 @@
+# SteamReviewGatherer
+Steamのレビューを収集するアプリケーションです
