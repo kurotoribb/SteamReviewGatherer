@@ -8,16 +8,24 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocarina/gocsv"
 	"github.com/peppage/kettle"
 )
 
+// CSVでの出力を前提としているので、複数要素ある場合はこの文字で区切る
+// 使う人が都合の良い文字にしてください
+const splitChar = "."
+
 func main() {
 
 	type CsvStruct struct {
 		Title                  string  `csv:"Title"`
+		Genre                  string  `csv:Genre`
+		Publisher              string  `csv:Publisher`
+		SupportedLanguages     string  `csv:SupportedLanguages`
 		AllTotalReviews        int     `csv:"AllTotalReviews"`
 		AllTotalPositive       int     `csv:"AllTotalPositive"`
 		AllTotalNegative       int     `csv:"AllTotalNegative"`
@@ -40,33 +48,44 @@ func main() {
 
 	// ここからAppIdのループ処理
 	for _, appId := range appIds {
+		// 最初の待機
 		time.Sleep(time.Second)
+
 		println("取得開始, AppId:", appId)
-		titleChan := make(chan string)
-		go GetTitleByAppId(steamClient, int64(appId), titleChan)
-		titleName := <-titleChan
-		defer close(titleChan)
-		if titleName == "err" {
+
+		appDataChan := make(chan *kettle.AppData)
+		defer close(appDataChan)
+
+		// 取得
+		go GetAppDataByAppId(steamClient, int64(appId), appDataChan)
+		appData := <-appDataChan
+
+		if appData.Name == "err" {
 			log.Println("タイトル取得失敗なのでスキップ", appId)
 			continue
 		}
 
+		// 日本語レビュー取得
 		time.Sleep(time.Second)
 		jaReviewChan := make(chan kettle.QuerySummary)
 		go GetStoreReviewByAppId(steamClient, int64(appId), "japanese", jaReviewChan)
 		jaReview := <-jaReviewChan
 		defer close(jaReviewChan)
-		println("ja取得完了", titleName)
+		println("ja取得完了", appData.Name)
 
+		// 全言語のレビュー取得
 		time.Sleep(time.Second)
 		allReviewChan := make(chan kettle.QuerySummary)
 		go GetStoreReviewByAppId(steamClient, int64(appId), "all", allReviewChan)
 		allReview := <-allReviewChan
 		defer close(allReviewChan)
-		println("all取得完了", titleName)
+		println("all取得完了", appData.Name)
 
 		csv := CsvStruct{
-			Title:                  titleName,
+			Title:                  appData.Name,
+			Genre:                  ConvertGenresToString(appData.Genres),
+			Publisher:              strings.Join(appData.Publishers, splitChar),
+			SupportedLanguages:     SplitSupportedLanguages(appData.SupportedLanguages),
 			AllTotalReviews:        allReview.TotalReviews,
 			AllTotalPositive:       allReview.TotalPositive,
 			AllTotalNegative:       allReview.TotalNegative,
@@ -89,19 +108,26 @@ func main() {
 	gocsv.MarshalFile(&csvSlice, file)
 }
 
-func GetTitleByAppId(steamClient *kettle.Client, appId int64, c chan string) {
+// GetAppDataByAppId AppIdをもとにAppDataを取得する
+func GetAppDataByAppId(steamClient *kettle.Client, appId int64, appdata chan *kettle.AppData) {
 	d, _, err := steamClient.Store.AppDetails(appId)
+
 	if err != nil {
 		// エラーが帰ってきたということはサーバ負荷が高い可能性もあるので10秒待つ
 		time.Sleep(time.Second * 10)
 
 		fmt.Println("AppDetails Error", appId, err)
-		c <- "err"
+		// とりあえずErrを名前にいれとく
+		// TODO: エラーハンドリングしやすい形に修正する
+		appdata <- &kettle.AppData{
+			Name: "Err",
+		}
 	}
 
-	c <- d.Name
+	appdata <- d
 }
 
+// GetStoreReviewByAppId ストアレビューを取得する
 func GetStoreReviewByAppId(steamClient *kettle.Client, appId int64, language string, c chan kettle.QuerySummary) {
 	d, _, err := steamClient.Store.AppReviews(&kettle.AppReviewsParams{
 		AppID:    appId,
@@ -127,6 +153,7 @@ func GetStoreReviewByAppId(steamClient *kettle.Client, appId int64, language str
 	c <- d.QuerySummary
 }
 
+// GetUserInput ユーザからの入力をパースするための受口
 func GetUserInput(caption string) string {
 	fmt.Print(caption + ":")
 	var inVal string
@@ -138,7 +165,40 @@ func GetUserInput(caption string) string {
 	return inVal
 }
 
-// []intで返してるけど、実際のAppIdはint64 まぁ上限超えないしいいだろの精神
+// ConvertGenresToString Genreの配列をいいかんじの文字列にする 出力先がcsvなので ,(カンマ) はつかわない
+func ConvertGenresToString(genres []kettle.Genre) string {
+	// TODO: たぶんもっと良い処理があるので改善したい
+	genre := ""
+	for i, g := range genres {
+		genre += g.Description
+
+		// 続きがあるなら区切り文字を追加する
+		if i < (len(genres) - 1) {
+			genre += splitChar
+		}
+	}
+
+	return genre
+}
+
+// SplitSupportedLanguages English<strong>*</strong>, Japanese<strong>*</strong>, のような形のものを整形する
+func SplitSupportedLanguages(languages string) string {
+	// + の削除
+	replaced := strings.Replace(languages, "<strong>*</strong>", "", -1)
+
+	// 音声も対応してるぜ！の削除
+	replaced = strings.Replace(replaced, "<br>languages with full audio support", "", -1)
+
+	// , だと都合が悪いので置き換え
+	replaced = strings.Replace(replaced, ",", splitChar, -1)
+
+	// まだ半角スペースがのこってるので掃除
+	replaced = strings.Replace(replaced, " ", "", -1)
+
+	return replaced
+}
+
+// ReadAppIdsFromCsv []intで返してるけど、実際のAppIdはint64 まぁ上限超えないしいいだろの精神
 func ReadAppIdsFromCsv() []int {
 	file, err := os.Open("appId.csv")
 	if err != nil {
