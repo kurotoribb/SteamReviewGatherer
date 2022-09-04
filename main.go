@@ -92,6 +92,8 @@ func main() {
 func GetTitleByAppId(steamClient *kettle.Client, appId int64, c chan string) {
 	d, _, err := steamClient.Store.AppDetails(appId)
 	if err != nil {
+		// エラーが帰ってきたということはサーバ負荷が高い可能性もあるので10秒待つ
+		time.Sleep(time.Second * 10)
 
 		fmt.Println("AppDetails Error", appId, err)
 		c <- "err"
@@ -106,6 +108,9 @@ func GetStoreReviewByAppId(steamClient *kettle.Client, appId int64, language str
 		Language: language,
 	})
 	if err != nil {
+		// エラーが帰ってきたということはサーバ負荷が高い可能性もあるので10秒待つ
+		time.Sleep(time.Second * 10)
+
 		// 適切なエラーハンドリングが思いつかなかったので負数を返しています
 		fmt.Println("GetStoreReview", err)
 		var dummy kettle.QuerySummary
